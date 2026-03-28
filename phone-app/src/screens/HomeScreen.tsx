@@ -41,12 +41,24 @@ export function HomeScreen() {
   const [errorMessage, setErrorMessage] = useState('');
 
   const voice = useRef<VoiceListener | null>(null);
+  const pendingTranscript = useRef<string | null>(null);
+
+  // Use a ref-based handler so the VoiceListener always calls the latest version
+  const handleTranscriptRef = useRef(handleTranscript);
+  handleTranscriptRef.current = handleTranscript;
 
   useEffect(() => {
     const vl = new VoiceListener();
     voice.current = vl;
-    vl.onPartial = setPartialText;
-    vl.onResult = handleTranscript;
+    vl.onPartial = (text) => {
+      setPartialText(text);
+      // Stash the latest partial so we can use it if no final result arrives
+      pendingTranscript.current = text;
+    };
+    vl.onResult = (transcript) => {
+      pendingTranscript.current = null; // final result arrived
+      handleTranscriptRef.current(transcript);
+    };
     vl.onError = (msg) => {
       setProcessingState('idle');
       setErrorMessage(msg);
@@ -57,8 +69,38 @@ export function HomeScreen() {
       setBleMessage(msg ?? statusLabel(status));
     });
 
+    // Listen for button presses from CPB
+    const unsubMessage = bleManager.onMessage((msg) => {
+      console.log('🟡 [HomeScreen] BLE message from device:', msg);
+      if (msg === 'VS') {
+        // CPB button pressed → start voice
+        if (voice.current) {
+          pendingTranscript.current = null;
+          setProcessingState('listening');
+          setPartialText('');
+          setLastTranscript('');
+          setErrorMessage('');
+          voice.current.start();
+        }
+      } else if (msg === 'VP') {
+        // CPB button pressed again → stop voice & send to Claude immediately
+        if (voice.current) {
+          voice.current.stop();
+          // Use whatever transcript we have right now (partial or final)
+          const text = pendingTranscript.current;
+          pendingTranscript.current = null;
+          if (text && text.trim().length > 0) {
+            handleTranscriptRef.current(text);
+          } else {
+            setProcessingState('idle');
+          }
+        }
+      }
+    });
+
     return () => {
       unsubscribe();
+      unsubMessage();
       vl.destroy();
       voice.current = null;
     };
@@ -108,29 +150,30 @@ export function HomeScreen() {
     }
   }
 
-  async function handleSpeakStart() {
+  async function handleSpeakToggle() {
     if (!bleManager.isConnected || !voice.current) return;
-    setProcessingState('listening');
-    setPartialText('');
-    setLastTranscript('');
-    setErrorMessage('');
-    await voice.current.start();
-  }
 
-  async function handleSpeakEnd() {
-    if (!voice.current) return;
-    console.log('🟡 [HomeScreen] handleSpeakEnd, state:', processingState);
-    await voice.current.stop();
-    // If no transcript came through, go back to idle
-    setTimeout(() => {
-      setProcessingState((prev) => {
-        if (prev === 'listening') {
-          console.log('🟡 [HomeScreen] No result received, resetting to idle');
-          return 'idle';
-        }
-        return prev;
-      });
-    }, 1500);
+    if (processingState === 'listening') {
+      // Second press → stop & send to Claude
+      console.log('🟡 [HomeScreen] Toggle OFF — stopping voice');
+      voice.current.stop();
+      const text = pendingTranscript.current;
+      pendingTranscript.current = null;
+      if (text && text.trim().length > 0) {
+        handleTranscriptRef.current(text);
+      } else {
+        setProcessingState('idle');
+      }
+    } else {
+      // First press → start listening
+      console.log('🟡 [HomeScreen] Toggle ON — starting voice');
+      pendingTranscript.current = null;
+      setProcessingState('listening');
+      setPartialText('');
+      setLastTranscript('');
+      setErrorMessage('');
+      await voice.current.start();
+    }
   }
 
   const canSpeak = bleStatus === 'connected' && processingState === 'idle';
@@ -204,17 +247,16 @@ export function HomeScreen() {
               isSpeaking && styles.speakButtonActive,
               !canSpeak && !isSpeaking && styles.speakButtonDisabled,
             ]}
-            onPressIn={handleSpeakStart}
-            onPressOut={handleSpeakEnd}
+            onPress={handleSpeakToggle}
             disabled={!canSpeak && !isSpeaking}
           >
             <Text style={styles.speakButtonIcon}>{isSpeaking ? '🎙' : '🎤'}</Text>
             <Text style={styles.speakButtonText}>
               {isSpeaking
-                ? 'Listening...'
+                ? 'Tap to send'
                 : !bleManager.isConnected
                 ? 'Connect first'
-                : 'Hold to speak'}
+                : 'Tap to speak'}
             </Text>
           </Pressable>
         )}

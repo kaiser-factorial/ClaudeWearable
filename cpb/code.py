@@ -3,7 +3,10 @@ Claude Wearable — Circuit Playground Bluefruit (Phase 2: BLE + Animations)
 Receives a 2-byte command over BLE UART and responds with a NeoPixel
 animation + speaker earcon.
 
-Commands:
+Button A = toggle voice: first press sends "VS" (start listening),
+second press sends "VP" (stop & send to Claude).
+
+Commands (phone → CPB):
     GS — green solid   (yes, confident)
     GP — green pulse   (yes, gentle)
     GC — green chase   (yes, enthusiastic)
@@ -11,6 +14,10 @@ Commands:
     RF — red flicker   (warning / urgent)
     YP — yellow pulse  (uncertain)
     BS — blue solid    (neutral info)
+
+Signals (CPB → phone):
+    VS — voice start (button A toggle on)
+    VP — voice stop  (button A toggle off)
 """
 
 import array
@@ -66,6 +73,12 @@ speaker_enable = digitalio.DigitalInOut(board.SPEAKER_ENABLE)
 speaker_enable.direction = digitalio.Direction.OUTPUT
 speaker_enable.value = True
 audio = audiopwmio.PWMAudioOut(board.SPEAKER)
+
+# Push-to-talk button (Button A on CPB)
+button_a = digitalio.DigitalInOut(board.BUTTON_A)
+button_a.direction = digitalio.Direction.INPUT
+button_a.pull = digitalio.Pull.DOWN
+button_a_prev = False  # track previous state for edge detection
 
 # ── Sound ──────────────────────────────────────────────────────────────────────
 
@@ -139,9 +152,36 @@ while True:
     frame = 0
     buf   = b""
     last_frame_time = time.monotonic()
+    button_a_prev = False
+    listening = False  # toggle state for voice
 
     while ble.connected:
-        # Read incoming bytes
+        # ── Button A: toggle voice ────────────────────────────────────
+        button_now = button_a.value
+        if button_now and not button_a_prev:
+            # Button just pressed → toggle listening
+            listening = not listening
+            if listening:
+                uart.write(b"VS")
+                pixels.fill((80, 80, 80))
+                pixels.show()
+                print("Button A → VS (start)")
+            else:
+                uart.write(b"VP")
+                pixels.fill(OFF)
+                pixels[0] = (0, 0, 180)
+                pixels.show()
+                print("Button A → VP (stop)")
+        button_a_prev = button_now
+
+        # White breathing effect while listening
+        if listening:
+            b = 0.1 + 0.3 * (0.5 + 0.5 * math.sin(frame * 0.2))
+            pixels.brightness = b
+            pixels.fill((100, 100, 120))
+            pixels.show()
+
+        # ── Read incoming bytes from phone ────────────────────────────
         if uart.in_waiting:
             buf += uart.read(uart.in_waiting)
 
@@ -154,12 +194,14 @@ while True:
                 current_color = COLORS[color_key]
                 current_anim  = anim
                 frame = 0
+                listening = False
                 play_earcon(notes)
 
         # Advance animation frame
         now = time.monotonic()
         if now - last_frame_time >= FRAME_RATE:
-            update_animation(frame, current_color, current_anim)
+            if not listening:
+                update_animation(frame, current_color, current_anim)
             frame += 1
             last_frame_time = now
 

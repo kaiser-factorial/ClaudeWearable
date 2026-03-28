@@ -26,6 +26,7 @@ class WearableBLEManager {
   private manager: BleManager;
   private device: Device | null = null;
   private statusListeners: ((status: BLEStatus, msg?: string) => void)[] = [];
+  private messageListeners: ((message: string) => void)[] = [];
 
   constructor() {
     try {
@@ -45,6 +46,18 @@ class WearableBLEManager {
 
   private emit(status: BLEStatus, msg?: string) {
     this.statusListeners.forEach(l => l(status, msg));
+  }
+
+  /** Listen for messages sent FROM the device (e.g. button presses) */
+  onMessage(cb: (message: string) => void) {
+    this.messageListeners.push(cb);
+    return () => {
+      this.messageListeners = this.messageListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emitMessage(message: string) {
+    this.messageListeners.forEach(l => l(message));
   }
 
   async checkBluetoothReady(): Promise<boolean> {
@@ -96,6 +109,26 @@ class WearableBLEManager {
         this.device = null;
         this.emit('idle', 'Device disconnected.');
       });
+
+      // Subscribe to TX characteristic to receive messages from device
+      this.device.monitorCharacteristicForService(
+        NUS_SERVICE,
+        NUS_TX_CHAR,
+        (error, char) => {
+          if (error) {
+            // "Operation was cancelled" is normal on disconnect — ignore it
+            if (!error.message?.includes('cancelled')) {
+              console.error('[BLEManager] TX monitor error:', error.message);
+            }
+            return;
+          }
+          if (char?.value) {
+            const decoded = Buffer.from(char.value, 'base64').toString('ascii');
+            console.log('[BLEManager] Received from device:', decoded);
+            this.emitMessage(decoded);
+          }
+        }
+      );
 
       this.emit('connected');
     } catch (e: any) {
