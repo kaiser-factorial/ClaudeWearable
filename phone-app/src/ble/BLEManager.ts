@@ -1,0 +1,135 @@
+/**
+ * BLE manager — scans for "Claude Wearable" devices advertising Nordic UART
+ * Service (NUS), connects, and writes 2-byte commands to the RX characteristic.
+ *
+ * Works with any microcontroller advertising NUS:
+ *   - Circuit Playground Bluefruit (cpb/code.py)
+ *   - ESP32-S3 (future)
+ */
+
+import { BleManager, Device, State } from 'react-native-ble-plx';
+import { Platform } from 'react-native';
+import { Buffer } from 'buffer';
+import { LEDCommand } from './commands';
+
+// Nordic UART Service UUIDs
+const NUS_SERVICE = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
+const NUS_RX_CHAR = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E'; // phone writes here
+const NUS_TX_CHAR = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E'; // phone reads here
+
+// Device name set in cpb/code.py: ble.name = "Claude Wearable"
+const DEVICE_NAME = 'Claude Wearable';
+
+export type BLEStatus = 'idle' | 'scanning' | 'connecting' | 'connected' | 'error';
+
+class WearableBLEManager {
+  private manager: BleManager;
+  private device: Device | null = null;
+  private statusListeners: ((status: BLEStatus, msg?: string) => void)[] = [];
+
+  constructor() {
+    this.manager = new BleManager();
+  }
+
+  onStatusChange(cb: (status: BLEStatus, msg?: string) => void) {
+    this.statusListeners.push(cb);
+    return () => {
+      this.statusListeners = this.statusListeners.filter(l => l !== cb);
+    };
+  }
+
+  private emit(status: BLEStatus, msg?: string) {
+    this.statusListeners.forEach(l => l(status, msg));
+  }
+
+  async checkBluetoothReady(): Promise<boolean> {
+    const state = await this.manager.state();
+    return state === State.PoweredOn;
+  }
+
+  async scan(): Promise<void> {
+    const ready = await this.checkBluetoothReady();
+    if (!ready) {
+      this.emit('error', 'Bluetooth is off. Please enable it.');
+      return;
+    }
+
+    this.emit('scanning');
+
+    this.manager.startDeviceScan(
+      [NUS_SERVICE],
+      { allowDuplicates: false },
+      (error, scannedDevice) => {
+        if (error) {
+          this.emit('error', error.message);
+          return;
+        }
+        if (scannedDevice?.name === DEVICE_NAME || scannedDevice?.localName === DEVICE_NAME) {
+          this.manager.stopDeviceScan();
+          this.connect(scannedDevice);
+        }
+      }
+    );
+
+    // Stop scanning after 15s if nothing found
+    setTimeout(() => {
+      this.manager.stopDeviceScan();
+      if (!this.device) {
+        this.emit('idle', 'No device found. Is the CPB powered on?');
+      }
+    }, 15000);
+  }
+
+  private async connect(scannedDevice: Device): Promise<void> {
+    this.emit('connecting');
+    try {
+      this.device = await scannedDevice.connect();
+      await this.device.discoverAllServicesAndCharacteristics();
+
+      // Watch for disconnection
+      this.device.onDisconnected((_error, _d) => {
+        this.device = null;
+        this.emit('idle', 'Device disconnected.');
+      });
+
+      this.emit('connected');
+    } catch (e: any) {
+      this.device = null;
+      this.emit('error', e.message ?? 'Connection failed.');
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.device) {
+      await this.device.cancelConnection();
+      this.device = null;
+    }
+    this.emit('idle');
+  }
+
+  get isConnected(): boolean {
+    return this.device !== null;
+  }
+
+  /**
+   * Write a 2-byte LED command to the NUS RX characteristic.
+   * e.g. sendCommand('GS') → sends bytes 0x47 0x53 ("GS" in ASCII)
+   */
+  async sendCommand(cmd: LEDCommand): Promise<void> {
+    if (!this.device) throw new Error('Not connected to a device.');
+
+    const bytes = Buffer.from(cmd, 'ascii').toString('base64');
+    await this.device.writeCharacteristicWithResponseForService(
+      NUS_SERVICE,
+      NUS_RX_CHAR,
+      bytes
+    );
+  }
+
+  destroy() {
+    this.manager.destroy();
+  }
+}
+
+// Singleton — one BLE manager for the whole app
+export const bleManager = new WearableBLEManager();

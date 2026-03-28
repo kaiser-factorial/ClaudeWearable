@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Claude Wearable",
+    "slug": "claude-wearable",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "claudewearable",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.claudewearable.app",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Claude Wearable uses Bluetooth to send LED commands to your device.",
+        "NSMicrophoneUsageDescription": "Claude Wearable uses your microphone to listen for voice commands.",
+        "NSSpeechRecognitionUsageDescription": "Claude Wearable converts your speech to text to send to Claude."
+      }
+    },
+    "android": {
+      "package": "com.claudewearable.app",
+      "permissions": [
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN",
+        "ACCESS_FINE_LOCATION",
+        "RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": ["peripheral", "central"],
+          "bluetoothAlwaysPermission": "Claude Wearable uses Bluetooth to send LED commands to your device."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Claude Wearable uses your microphone to listen for voice commands.",
+          "speechRecognitionPermission": "Claude Wearable converts your speech to text to send to Claude."
+        }
+      ]
+    ]
+  }
+}

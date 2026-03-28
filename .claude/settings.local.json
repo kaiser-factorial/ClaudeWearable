@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(brew --version)",
+      "Bash(brew install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python3 -c \"import serial.tools.list_ports; [print\\(p.device, p.description\\) for p in serial.tools.list_ports.comports\\(\\)]\")",
+      "Bash(python3 -c \"import serial.tools.list_ports; [print\\(p.device, p.description\\) for p in serial.tools.list_ports.comports\\(\\) if ''usbmodem'' in p.device]\")",
+      "Bash(/Volumes/CIRCUITPY/boot.py:*)",
+      "Bash(python3 -c \":*)",
+      "mcp__Desktop_Commander__list_directory",
+      "Bash(xcodebuild -workspace ios/ClaudeWearable.xcworkspace -scheme ClaudeWearable -destination 'generic/platform=iOS' build)"
+    ]
+  }
+}
