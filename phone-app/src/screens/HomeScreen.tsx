@@ -15,8 +15,8 @@ import {
 import { bleManager, BLEStatus, SensorData, parseSensorData } from '../ble/BLEManager';
 import { LEDCommand, COMMAND_DESCRIPTIONS } from '../ble/commands';
 import { VoiceListener } from '../audio/VoiceListener';
-import { getCommandFromClaude, ClaudeResponse } from '../api/claude';
-import { loadApiKey } from '../storage/apiKey';
+import { getCommandFromLLM, LLMResponse } from '../api/llm';
+import { loadProviderConfig, loadProviderApiKey, PROVIDER_LABELS } from '../storage/apiKey';
 
 type ProcessingState = 'idle' | 'listening' | 'thinking' | 'sending';
 
@@ -166,21 +166,22 @@ export function HomeScreen() {
 
     // Attach sensor context if available (keep data for future interactions)
     const sensors = sensorData.current;
-    let messageForClaude = transcript;
+    let messageForLLM = transcript;
     if (sensors) {
       const tempF = (sensors.tempC * 9 / 5 + 32).toFixed(1);
-      messageForClaude += `\n\n[Sensor data: temperature=${sensors.tempC.toFixed(1)}°C (${tempF}°F), light=${sensors.light}%, accelerometer=(${sensors.accelX.toFixed(1)}, ${sensors.accelY.toFixed(1)}, ${sensors.accelZ.toFixed(1)}) m/s²]`;
+      messageForLLM += `\n\n[Sensor data: temperature=${sensors.tempC.toFixed(1)}°C (${tempF}°F), light=${sensors.light}%, accelerometer=(${sensors.accelX.toFixed(1)}, ${sensors.accelY.toFixed(1)}, ${sensors.accelZ.toFixed(1)}) m/s²]`;
     }
 
     try {
-      const apiKey = await loadApiKey();
-      if (!apiKey) {
-        Alert.alert('No API key', 'Please add your Anthropic API key in Settings.');
+      const config = await loadProviderConfig();
+      const apiKey = await loadProviderApiKey(config.provider);
+      if (!apiKey && config.provider !== 'ollama') {
+        Alert.alert('No API key', `Please add your ${PROVIDER_LABELS[config.provider]} API key in Settings.`);
         setProcessingState('idle');
         return;
       }
 
-      const result = await getCommandFromClaude(messageForClaude, apiKey);
+      const result = await getCommandFromLLM(messageForLLM, config, apiKey);
       setLastCommand(result.command);
       setLastExplanation(result.explanation);
       setSessionLog((prev) => [

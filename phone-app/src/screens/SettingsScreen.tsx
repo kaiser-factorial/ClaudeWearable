@@ -10,7 +10,35 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { saveApiKey, loadApiKey, deleteApiKey } from '../storage/apiKey';
+import {
+  Provider,
+  ProviderConfig,
+  PROVIDER_LABELS,
+  DEFAULT_MODELS,
+  saveProviderConfig,
+  loadProviderConfig,
+  saveProviderApiKey,
+  loadProviderApiKey,
+  deleteProviderApiKey,
+} from '../storage/apiKey';
+
+const PROVIDERS: Provider[] = ['anthropic', 'openai', 'ollama'];
+
+const PROVIDER_COLORS: Record<Provider, string> = {
+  anthropic: '#d4a27f',
+  openai: '#10a37f',
+  ollama: '#888',
+};
+
+const KEY_PREFIXES: Record<string, string> = {
+  anthropic: 'sk-ant-',
+  openai: 'sk-',
+};
+
+const KEY_PLACEHOLDERS: Record<string, string> = {
+  anthropic: 'sk-ant-...',
+  openai: 'sk-...',
+};
 
 const RESPONSES = [
   { code: 'GS', color: '#22c55e', label: 'Green Solid', meaning: 'Yes, confident' },
@@ -25,75 +53,188 @@ const RESPONSES = [
 ];
 
 export function SettingsScreen() {
+  const [provider, setProvider] = useState<Provider>('anthropic');
+  const [model, setModel] = useState(DEFAULT_MODELS.anthropic);
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [keyInput, setKeyInput] = useState('');
   const [hasSavedKey, setHasSavedKey] = useState(false);
 
+  // Load saved config on mount
   useEffect(() => {
-    loadApiKey().then(k => setHasSavedKey(!!k));
+    (async () => {
+      const config = await loadProviderConfig();
+      setProvider(config.provider);
+      setModel(config.model);
+      if (config.ollamaUrl) setOllamaUrl(config.ollamaUrl);
+
+      const key = await loadProviderApiKey(config.provider);
+      setHasSavedKey(!!key);
+    })();
   }, []);
 
-  async function handleSave() {
+  // When provider changes, load its saved key status and set default model
+  async function handleProviderChange(p: Provider) {
+    setProvider(p);
+    setModel(DEFAULT_MODELS[p]);
+    setKeyInput('');
+
+    const key = await loadProviderApiKey(p);
+    setHasSavedKey(!!key);
+
+    // Save config immediately
+    await saveProviderConfig({
+      provider: p,
+      model: DEFAULT_MODELS[p],
+      ollamaUrl: p === 'ollama' ? ollamaUrl : undefined,
+    });
+  }
+
+  async function handleSaveConfig() {
+    await saveProviderConfig({
+      provider,
+      model: model.trim() || DEFAULT_MODELS[provider],
+      ollamaUrl: provider === 'ollama' ? ollamaUrl.trim() : undefined,
+    });
+    Alert.alert('Saved', 'Model configuration updated.');
+  }
+
+  async function handleSaveKey() {
     const trimmed = keyInput.trim();
-    if (!trimmed.startsWith('sk-ant-')) {
-      Alert.alert('Invalid key', 'Anthropic API keys start with "sk-ant-".');
+    const prefix = KEY_PREFIXES[provider];
+    if (prefix && !trimmed.startsWith(prefix)) {
+      Alert.alert('Invalid key', `${PROVIDER_LABELS[provider]} API keys start with "${prefix}".`);
       return;
     }
-    await saveApiKey(trimmed);
+    await saveProviderApiKey(provider, trimmed);
     setHasSavedKey(true);
     setKeyInput('');
     Alert.alert('Saved', 'API key stored securely on this device.');
   }
 
-  async function handleDelete() {
+  async function handleDeleteKey() {
     Alert.alert('Remove API key', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
-          await deleteApiKey();
+          await deleteProviderApiKey(provider);
           setHasSavedKey(false);
         },
       },
     ]);
   }
 
+  const needsApiKey = provider !== 'ollama';
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* API Key Section */}
-        <Text style={styles.sectionTitle}>API Key</Text>
+        {/* Provider Section */}
+        <Text style={styles.sectionTitle}>LLM Provider</Text>
         <Text style={styles.hint}>
-          {hasSavedKey
-            ? 'A key is already saved. Paste a new one below to replace it.'
-            : 'Enter your Anthropic API key. Stored securely in the device keychain.'}
+          Choose which AI service powers your wearable responses.
         </Text>
 
+        <View style={styles.providerRow}>
+          {PROVIDERS.map((p) => (
+            <TouchableOpacity
+              key={p}
+              style={[
+                styles.providerButton,
+                provider === p && {
+                  borderColor: PROVIDER_COLORS[p],
+                  backgroundColor: PROVIDER_COLORS[p] + '18',
+                },
+              ]}
+              onPress={() => handleProviderChange(p)}
+            >
+              <Text
+                style={[
+                  styles.providerButtonText,
+                  provider === p && { color: PROVIDER_COLORS[p] },
+                ]}
+              >
+                {PROVIDER_LABELS[p]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Model Section */}
+        <Text style={styles.label}>Model</Text>
         <TextInput
           style={styles.input}
-          placeholder="sk-ant-..."
+          placeholder={DEFAULT_MODELS[provider]}
           placeholderTextColor="#555"
-          value={keyInput}
-          onChangeText={setKeyInput}
-          secureTextEntry
+          value={model}
+          onChangeText={setModel}
           autoCapitalize="none"
           autoCorrect={false}
         />
 
-        <TouchableOpacity
-          style={[styles.button, !keyInput.trim() && styles.buttonDisabled]}
-          onPress={handleSave}
-          disabled={!keyInput.trim()}
-        >
-          <Text style={styles.buttonText}>Save Key</Text>
+        {/* Ollama URL (only for Ollama) */}
+        {provider === 'ollama' && (
+          <>
+            <Text style={styles.label}>Ollama URL</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="http://localhost:11434"
+              placeholderTextColor="#555"
+              value={ollamaUrl}
+              onChangeText={setOllamaUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            <Text style={styles.hint}>
+              Use your Mac's IP address (e.g. http://10.0.0.5:11434) so the phone can reach it over Wi-Fi. No API key needed.
+            </Text>
+          </>
+        )}
+
+        <TouchableOpacity style={styles.button} onPress={handleSaveConfig}>
+          <Text style={styles.buttonText}>Save Model Config</Text>
         </TouchableOpacity>
 
-        {hasSavedKey && (
-          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-            <Text style={styles.deleteText}>Remove saved key</Text>
-          </TouchableOpacity>
+        {/* API Key Section (not for Ollama) */}
+        {needsApiKey && (
+          <>
+            <View style={styles.divider} />
+            <Text style={styles.sectionTitle}>API Key</Text>
+            <Text style={styles.hint}>
+              {hasSavedKey
+                ? `A ${PROVIDER_LABELS[provider]} key is saved. Paste a new one to replace it.`
+                : `Enter your ${PROVIDER_LABELS[provider]} API key. Stored securely in the device keychain.`}
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder={KEY_PLACEHOLDERS[provider] || 'API key...'}
+              placeholderTextColor="#555"
+              value={keyInput}
+              onChangeText={setKeyInput}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <TouchableOpacity
+              style={[styles.button, !keyInput.trim() && styles.buttonDisabled]}
+              onPress={handleSaveKey}
+              disabled={!keyInput.trim()}
+            >
+              <Text style={styles.buttonText}>Save Key</Text>
+            </TouchableOpacity>
+
+            {hasSavedKey && (
+              <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteKey}>
+                <Text style={styles.deleteText}>Remove saved key</Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </KeyboardAvoidingView>
 
@@ -164,11 +305,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
   },
+  label: {
+    color: '#aaa',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 6,
+    marginTop: 4,
+  },
   hint: {
     color: '#888',
     fontSize: 13,
     marginBottom: 16,
     lineHeight: 20,
+  },
+  providerRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+  },
+  providerButton: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: '#333',
+    borderRadius: 10,
+    padding: 12,
+    alignItems: 'center',
+  },
+  providerButtonText: {
+    color: '#666',
+    fontSize: 13,
+    fontWeight: '600',
   },
   input: {
     backgroundColor: '#1a1a1a',
