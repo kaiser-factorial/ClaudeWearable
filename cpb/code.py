@@ -6,6 +6,9 @@ animation + speaker earcon.
 Button A = toggle voice: first press sends "VS" (start listening),
 second press sends "VP" (stop & send to Claude).
 
+Slide switch = sensor mode: when ON (toward board center), sensor data
+is sent along with VS so Claude has environmental context.
+
 Commands (phone → CPB):
     GS — green solid   (yes, confident)
     GP — green pulse   (yes, gentle)
@@ -16,8 +19,9 @@ Commands (phone → CPB):
     BS — blue solid    (neutral info)
 
 Signals (CPB → phone):
-    VS — voice start (button A toggle on)
-    VP — voice stop  (button A toggle off)
+    VS        — voice start (no sensor data)
+    VS:t,l,x,y,z — voice start + sensor snapshot
+    VP        — voice stop
 """
 
 import array
@@ -29,7 +33,10 @@ import digitalio
 import neopixel
 import audiopwmio
 import audiocore
+import analogio
 import adafruit_ble
+import adafruit_lis3dh
+import adafruit_thermistor
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 from adafruit_ble.services.nordic import UARTService
 
@@ -44,6 +51,7 @@ COLORS = {
     "R": (200, 0, 0),
     "Y": (200, 140, 0),
     "B": (0, 80, 200),
+    "P": (140, 0, 200),
 }
 
 OFF = (0, 0, 0)
@@ -57,6 +65,8 @@ RESPONSES = {
     b"RF": ("R", "flicker", [(300, 0.07), (300, 0.07), (300, 0.1)]),
     b"YP": ("Y", "pulse",   [(600, 0.1), (550, 0.12)]),
     b"BS": ("B", "solid",   [(660, 0.2)]),
+    b"PS": ("P", "solid",   [(520, 0.12), (780, 0.15)]),
+    b"PP": ("P", "pulse",   [(520, 0.2), (620, 0.15)]),
 }
 
 # ── Hardware setup ─────────────────────────────────────────────────────────────
@@ -79,6 +89,33 @@ button_a = digitalio.DigitalInOut(board.BUTTON_A)
 button_a.direction = digitalio.Direction.INPUT
 button_a.pull = digitalio.Pull.DOWN
 button_a_prev = False  # track previous state for edge detection
+
+# Slide switch — ON = sensor mode enabled
+slide_switch = digitalio.DigitalInOut(board.SLIDE_SWITCH)
+slide_switch.direction = digitalio.Direction.INPUT
+slide_switch.pull = digitalio.Pull.UP
+
+# Sensors
+thermistor = adafruit_thermistor.Thermistor(
+    board.TEMPERATURE, 10000, 10000, 25, 3950
+)
+light_sensor = analogio.AnalogIn(board.LIGHT)
+
+import busio
+i2c = busio.I2C(board.ACCELEROMETER_SCL, board.ACCELEROMETER_SDA)
+accelerometer = adafruit_lis3dh.LIS3DH_I2C(i2c, address=0x19)
+accelerometer.range = adafruit_lis3dh.RANGE_2_G
+
+TEMP_OFFSET = -5.0  # CPB thermistor reads high due to processor heat
+
+def read_sensors():
+    """Read all sensors and return as a compact string: temp,light,x,y,z"""
+    temp_c = thermistor.temperature + TEMP_OFFSET
+    # Light sensor: raw 0-65535 but indoor range is typically 0-5000
+    light_raw = light_sensor.value
+    light_pct = min(100, (light_raw * 100) // 5000)
+    x, y, z = accelerometer.acceleration
+    return "{:.1f},{},{:.1f},{:.1f},{:.1f}".format(temp_c, light_pct, x, y, z)
 
 # ── Sound ──────────────────────────────────────────────────────────────────────
 
@@ -154,20 +191,49 @@ while True:
     last_frame_time = time.monotonic()
     button_a_prev = False
     listening = False  # toggle state for voice
+    # Send initial slide switch state immediately on connect
+    last_switch_state = slide_switch.value
+    if last_switch_state:
+        uart.write(b"S1\n")
+        print("Initial slide switch → S1")
+    else:
+        uart.write(b"S0\n")
+        print("Initial slide switch → S0")
+    last_switch_check = time.monotonic()
 
     while ble.connected:
+        # ── Slide switch: notify phone of sensor mode changes ─────────
+        now_mono = time.monotonic()
+        if now_mono - last_switch_check >= 0.5:  # check every 500ms
+            last_switch_check = now_mono
+            sw = slide_switch.value
+            if sw != last_switch_state:
+                last_switch_state = sw
+                if sw:
+                    uart.write(b"S1\n")  # sensors on
+                else:
+                    uart.write(b"S0\n")  # sensors off
+                print("Slide switch →", "S1" if sw else "S0")
+
         # ── Button A: toggle voice ────────────────────────────────────
         button_now = button_a.value
         if button_now and not button_a_prev:
             # Button just pressed → toggle listening
             listening = not listening
             if listening:
-                uart.write(b"VS")
+                if slide_switch.value:
+                    # Sensor mode ON — attach sensor data
+                    sensor_str = read_sensors()
+                    msg = "VS:" + sensor_str + "\n"
+                    uart.write(msg.encode())
+                    print("Button A → " + msg.strip())
+                else:
+                    uart.write(b"VS\n")
+                    print("Button A → VS (start)")
                 pixels.fill((80, 80, 80))
                 pixels.show()
-                print("Button A → VS (start)")
             else:
-                uart.write(b"VP")
+                uart.write(b"VP\n")
                 pixels.fill(OFF)
                 pixels[0] = (0, 0, 180)
                 pixels.show()
@@ -189,7 +255,13 @@ while True:
         while len(buf) >= 2:
             cmd = buf[:2]
             buf = buf[2:]
-            if cmd in RESPONSES:
+            if cmd == b"SR":
+                # Sensor request from phone — reply with sensor data
+                if slide_switch.value:
+                    sensor_str = read_sensors()
+                    uart.write(("SD:" + sensor_str + "\n").encode())
+                    print("Sensor request → SD:" + sensor_str)
+            elif cmd in RESPONSES:
                 color_key, anim, notes = RESPONSES[cmd]
                 current_color = COLORS[color_key]
                 current_anim  = anim

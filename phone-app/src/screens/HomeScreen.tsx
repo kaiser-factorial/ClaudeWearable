@@ -7,11 +7,15 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  ScrollView,
+  Modal,
+  Animated,
+  Dimensions,
 } from 'react-native';
-import { bleManager, BLEStatus } from '../ble/BLEManager';
+import { bleManager, BLEStatus, SensorData, parseSensorData } from '../ble/BLEManager';
 import { LEDCommand, COMMAND_DESCRIPTIONS } from '../ble/commands';
 import { VoiceListener } from '../audio/VoiceListener';
-import { getCommandFromClaude } from '../api/claude';
+import { getCommandFromClaude, ClaudeResponse } from '../api/claude';
 import { loadApiKey } from '../storage/apiKey';
 
 type ProcessingState = 'idle' | 'listening' | 'thinking' | 'sending';
@@ -29,6 +33,7 @@ const COMMAND_COLOR: Record<string, string> = {
   R: '#ef4444',
   Y: '#eab308',
   B: '#3b82f6',
+  P: '#a855f7',
 };
 
 export function HomeScreen() {
@@ -38,10 +43,19 @@ export function HomeScreen() {
   const [partialText, setPartialText] = useState('');
   const [lastTranscript, setLastTranscript] = useState('');
   const [lastCommand, setLastCommand] = useState<LEDCommand | null>(null);
+  const [lastExplanation, setLastExplanation] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [sessionLog, setSessionLog] = useState<
+    { question: string; command: LEDCommand; answer: string; time: string }[]
+  >([]);
+  const [logVisible, setLogVisible] = useState(false);
+  const [sensorsActive, setSensorsActive] = useState(false);
+  const [displaySensors, setDisplaySensors] = useState<SensorData | null>(null);
 
   const voice = useRef<VoiceListener | null>(null);
   const pendingTranscript = useRef<string | null>(null);
+  const sensorData = useRef<SensorData | null>(null);
+  const transcriptSent = useRef(false);  // guard against double-submit
 
   // Use a ref-based handler so the VoiceListener always calls the latest version
   const handleTranscriptRef = useRef(handleTranscript);
@@ -67,14 +81,22 @@ export function HomeScreen() {
     const unsubscribe = bleManager.onStatusChange((status, msg) => {
       setBleStatus(status);
       setBleMessage(msg ?? statusLabel(status));
+      // no longer clearing log — it persists across connections
     });
 
     // Listen for button presses from CPB
     const unsubMessage = bleManager.onMessage((msg) => {
       console.log('🟡 [HomeScreen] BLE message from device:', msg);
-      if (msg === 'VS') {
-        // CPB button pressed → start voice
+      if (msg === 'VS' || msg.startsWith('VS:')) {
+        // CPB button pressed → start voice (maybe with sensor data)
+        sensorData.current = parseSensorData(msg);
+        setSensorsActive(sensorData.current !== null);
+        setDisplaySensors(sensorData.current);
+        if (sensorData.current) {
+          console.log('🟡 [HomeScreen] Sensor data:', sensorData.current);
+        }
         if (voice.current) {
+          transcriptSent.current = false;
           pendingTranscript.current = null;
           setProcessingState('listening');
           setPartialText('');
@@ -82,6 +104,22 @@ export function HomeScreen() {
           setErrorMessage('');
           voice.current.start();
         }
+      } else if (msg.startsWith('SD:')) {
+        // Sensor data response from CPB (requested via SR)
+        const parts = msg.slice(3).split(',');
+        if (parts.length === 5) {
+          const [t, l, x, y, z] = parts.map(Number);
+          if (![t, l, x, y, z].some(isNaN)) {
+            const data: SensorData = { tempC: t, light: l, accelX: x, accelY: y, accelZ: z };
+            sensorData.current = data;
+            setDisplaySensors(data);
+          }
+        }
+      } else if (msg === 'S1') {
+        setSensorsActive(true);
+      } else if (msg === 'S0') {
+        setSensorsActive(false);
+        setDisplaySensors(null);
       } else if (msg === 'VP') {
         // CPB button pressed again → stop voice & send to Claude immediately
         if (voice.current) {
@@ -117,10 +155,22 @@ export function HomeScreen() {
   }
 
   async function handleTranscript(transcript: string) {
+    // Guard: only process once per interaction
+    if (transcriptSent.current) return;
+    transcriptSent.current = true;
+
     setLastTranscript(transcript);
     setPartialText('');
     setProcessingState('thinking');
     setErrorMessage('');
+
+    // Attach sensor context if available (keep data for future interactions)
+    const sensors = sensorData.current;
+    let messageForClaude = transcript;
+    if (sensors) {
+      const tempF = (sensors.tempC * 9 / 5 + 32).toFixed(1);
+      messageForClaude += `\n\n[Sensor data: temperature=${sensors.tempC.toFixed(1)}°C (${tempF}°F), light=${sensors.light}%, accelerometer=(${sensors.accelX.toFixed(1)}, ${sensors.accelY.toFixed(1)}, ${sensors.accelZ.toFixed(1)}) m/s²]`;
+    }
 
     try {
       const apiKey = await loadApiKey();
@@ -130,11 +180,21 @@ export function HomeScreen() {
         return;
       }
 
-      const command = await getCommandFromClaude(transcript, apiKey);
-      setLastCommand(command);
+      const result = await getCommandFromClaude(messageForClaude, apiKey);
+      setLastCommand(result.command);
+      setLastExplanation(result.explanation);
+      setSessionLog((prev) => [
+        ...prev,
+        {
+          question: transcript,
+          command: result.command,
+          answer: result.explanation,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
       setProcessingState('sending');
 
-      await bleManager.sendCommand(command);
+      await bleManager.sendCommand(result.command);
     } catch (e: any) {
       setErrorMessage(e.message ?? 'Something went wrong.');
     } finally {
@@ -167,11 +227,16 @@ export function HomeScreen() {
     } else {
       // First press → start listening
       console.log('🟡 [HomeScreen] Toggle ON — starting voice');
+      transcriptSent.current = false;
       pendingTranscript.current = null;
       setProcessingState('listening');
       setPartialText('');
       setLastTranscript('');
       setErrorMessage('');
+      // Request sensor snapshot if sensors are active
+      if (sensorsActive) {
+        try { await bleManager.sendRaw('SR'); } catch {}
+      }
       await voice.current.start();
     }
   }
@@ -205,7 +270,7 @@ export function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Last command display */}
+      {/* Last command + Claude's answer */}
       <View style={styles.commandArea}>
         {lastCommand ? (
           <>
@@ -213,6 +278,9 @@ export function HomeScreen() {
               {lastCommand}
             </Text>
             <Text style={styles.commandDesc}>{COMMAND_DESCRIPTIONS[lastCommand]}</Text>
+            {lastExplanation ? (
+              <Text style={styles.explanationText}>{lastExplanation}</Text>
+            ) : null}
           </>
         ) : (
           <Text style={styles.commandPlaceholder}>---</Text>
@@ -231,7 +299,7 @@ export function HomeScreen() {
         ) : null}
       </View>
 
-      {/* Speak button */}
+      {/* Speak button — centered */}
       <View style={styles.speakArea}>
         {isProcessing ? (
           <View style={styles.processingContainer}>
@@ -261,6 +329,81 @@ export function HomeScreen() {
           </Pressable>
         )}
       </View>
+
+      {/* Sensor info — below button */}
+      {bleStatus === 'connected' && (
+        <View style={styles.sensorBar}>
+          <Text style={[styles.sensorText, sensorsActive && styles.sensorTextActive]}>
+            {sensorsActive ? '📡 Sensors active' : '📡 Sensors off'}
+          </Text>
+          {sensorsActive && displaySensors && (
+            <View style={styles.sensorDataContainer}>
+              <Text style={styles.sensorDataText}>
+                {displaySensors.tempC.toFixed(1)}°C / {(displaySensors.tempC * 9 / 5 + 32).toFixed(1)}°F
+              </Text>
+              <Text style={styles.sensorDataText}>
+                Light: {displaySensors.light}%
+              </Text>
+              <Text style={styles.sensorDataText}>
+                Accel: ({displaySensors.accelX.toFixed(1)}, {displaySensors.accelY.toFixed(1)}, {displaySensors.accelZ.toFixed(1)})
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Log button */}
+      {sessionLog.length > 0 && (
+        <TouchableOpacity
+          style={styles.logButton}
+          onPress={() => setLogVisible(true)}
+        >
+          <Text style={styles.logButtonText}>
+            History ({sessionLog.length})
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Session log drawer */}
+      <Modal
+        visible={logVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setLogVisible(false)}
+      >
+        <View style={styles.logModal}>
+          <View style={styles.logHeader}>
+            <Text style={styles.logTitle}>Session History</Text>
+            <TouchableOpacity onPress={() => setLogVisible(false)}>
+              <Text style={styles.logClose}>Done</Text>
+            </TouchableOpacity>
+          </View>
+          {sessionLog.length === 0 ? (
+            <Text style={styles.logEmpty}>No interactions yet</Text>
+          ) : (
+            <ScrollView style={styles.logScroll} showsVerticalScrollIndicator={false}>
+              {[...sessionLog].reverse().map((entry, i) => (
+                <View key={i} style={styles.logEntry}>
+                  <View style={styles.logEntryHeader}>
+                    <Text style={[styles.logCommand, { color: COMMAND_COLOR[entry.command[0]] ?? '#fff' }]}>
+                      {entry.command}
+                    </Text>
+                    <Text style={styles.logTime}>{entry.time}</Text>
+                  </View>
+                  <Text style={styles.logQuestion}>"{entry.question}"</Text>
+                  <Text style={styles.logExplanation}>{entry.answer}</Text>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={styles.clearLogButton}
+                onPress={() => { setSessionLog([]); setLogVisible(false); }}
+              >
+                <Text style={styles.clearLogText}>Clear History</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -270,6 +413,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0d0d0d',
     paddingHorizontal: 20,
+  },
+  sensorBar: {
+    paddingTop: 16,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  sensorText: {
+    color: '#555',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  sensorTextActive: {
+    color: '#22c55e',
+  },
+  sensorDataContainer: {
+    marginTop: 8,
+    alignItems: 'center',
+    gap: 2,
+  },
+  sensorDataText: {
+    color: '#666',
+    fontSize: 11,
+    fontFamily: 'monospace',
   },
   connectionBar: {
     flexDirection: 'row',
@@ -307,20 +473,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   commandArea: {
-    flex: 2,
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   commandCode: {
-    fontSize: 80,
+    fontSize: 48,
     fontWeight: '800',
-    letterSpacing: 8,
+    letterSpacing: 6,
     fontFamily: 'monospace',
   },
   commandDesc: {
     color: '#888',
-    fontSize: 16,
-    marginTop: 8,
+    fontSize: 14,
+    marginTop: 4,
+  },
+  explanationText: {
+    color: '#bbb',
+    fontSize: 15,
+    marginTop: 12,
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 10,
   },
   commandPlaceholder: {
     color: '#2a2a2a',
@@ -347,7 +521,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   speakArea: {
-    paddingBottom: 48,
+    flex: 2,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   speakButton: {
@@ -387,5 +562,99 @@ const styles = StyleSheet.create({
   processingText: {
     color: '#888',
     fontSize: 14,
+  },
+  logButton: {
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    marginBottom: 16,
+    borderRadius: 16,
+    backgroundColor: '#1a1a2e',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  logButtonText: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  logModal: {
+    flex: 1,
+    backgroundColor: '#0d0d0d',
+    paddingTop: 20,
+  },
+  logHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  logTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  logClose: {
+    color: '#3b82f6',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  logEmpty: {
+    color: '#555',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 40,
+  },
+  logScroll: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  logEntry: {
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  logEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  logCommand: {
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: 'monospace',
+  },
+  logTime: {
+    color: '#555',
+    fontSize: 12,
+  },
+  logQuestion: {
+    color: '#777',
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginBottom: 6,
+  },
+  logExplanation: {
+    color: '#bbb',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  clearLogButton: {
+    alignSelf: 'center',
+    marginVertical: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  clearLogText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '500',
   },
 });

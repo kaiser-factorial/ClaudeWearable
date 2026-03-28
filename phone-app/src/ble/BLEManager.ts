@@ -22,11 +22,30 @@ const DEVICE_NAME = 'Claude Wearable';
 
 export type BLEStatus = 'idle' | 'scanning' | 'connecting' | 'connected' | 'error';
 
+export interface SensorData {
+  tempC: number;
+  light: number;
+  accelX: number;
+  accelY: number;
+  accelZ: number;
+}
+
+/** Parse "VS:22.5,180,0.1,-0.3,9.8" → SensorData or null */
+export function parseSensorData(msg: string): SensorData | null {
+  if (!msg.startsWith('VS:')) return null;
+  const parts = msg.slice(3).split(',');
+  if (parts.length !== 5) return null;
+  const [t, l, x, y, z] = parts.map(Number);
+  if ([t, l, x, y, z].some(isNaN)) return null;
+  return { tempC: t, light: l, accelX: x, accelY: y, accelZ: z };
+}
+
 class WearableBLEManager {
   private manager: BleManager;
   private device: Device | null = null;
   private statusListeners: ((status: BLEStatus, msg?: string) => void)[] = [];
   private messageListeners: ((message: string) => void)[] = [];
+  private rxBuffer = '';  // buffer for reassembling split BLE packets
 
   constructor() {
     try {
@@ -107,6 +126,7 @@ class WearableBLEManager {
       // Watch for disconnection
       this.device.onDisconnected((_error, _d) => {
         this.device = null;
+        this.rxBuffer = '';
         this.emit('idle', 'Device disconnected.');
       });
 
@@ -124,8 +144,18 @@ class WearableBLEManager {
           }
           if (char?.value) {
             const decoded = Buffer.from(char.value, 'base64').toString('ascii');
-            console.log('[BLEManager] Received from device:', decoded);
-            this.emitMessage(decoded);
+            this.rxBuffer += decoded;
+            // Split on newlines — each complete message ends with \n
+            const parts = this.rxBuffer.split('\n');
+            // Last part is incomplete (no trailing \n yet) — keep it in buffer
+            this.rxBuffer = parts.pop() ?? '';
+            for (const msg of parts) {
+              const trimmed = msg.trim();
+              if (trimmed.length > 0) {
+                console.log('[BLEManager] Received from device:', trimmed);
+                this.emitMessage(trimmed);
+              }
+            }
           }
         }
       );
@@ -157,6 +187,18 @@ class WearableBLEManager {
     if (!this.device) throw new Error('Not connected to a device.');
 
     const bytes = Buffer.from(cmd, 'ascii').toString('base64');
+    await this.device.writeCharacteristicWithResponseForService(
+      NUS_SERVICE,
+      NUS_RX_CHAR,
+      bytes
+    );
+  }
+
+  /** Send an arbitrary string to the device */
+  async sendRaw(msg: string): Promise<void> {
+    if (!this.device) throw new Error('Not connected to a device.');
+
+    const bytes = Buffer.from(msg, 'ascii').toString('base64');
     await this.device.writeCharacteristicWithResponseForService(
       NUS_SERVICE,
       NUS_RX_CHAR,
