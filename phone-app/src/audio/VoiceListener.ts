@@ -2,12 +2,9 @@
  * Wraps expo-speech-recognition for push-to-talk voice recognition.
  * Uses the device's native STT engine (no transcription API cost).
  *
- * Usage:
- *   const listener = new VoiceListener();
- *   listener.onResult = (text) => { ... };
- *   listener.onError = (msg) => { ... };
- *   await listener.start();   // call on button press-in
- *   await listener.stop();    // call on button press-out
+ * Listeners are registered lazily on first start() call to avoid
+ * triggering native speech recognition APIs before the app is fully ready
+ * (which crashes on iOS 26).
  */
 
 import {
@@ -21,27 +18,43 @@ export class VoiceListener {
   onPartial: ((partial: string) => void) | null = null;
 
   private subscriptions: { remove(): void }[] = [];
+  private initialized = false;
 
   constructor() {
-    this.subscriptions.push(
-      addSpeechRecognitionListener('result', (e) => {
-        const text = e.results?.[0]?.transcript;
-        if (text && e.isFinal) {
-          this.onResult?.(text);
-        } else if (text) {
-          this.onPartial?.(text);
-        }
-      }),
-      addSpeechRecognitionListener('error', (e) => {
-        const msg = e.error ?? 'Speech recognition error';
-        // Ignore "no speech" errors that fire when the user releases quickly
-        if (msg === 'no-speech') return;
-        this.onError?.(msg);
-      }),
-    );
+    // Don't register native listeners here — defer to init()
+    console.log('🟡 [VoiceListener] constructor (no native calls)');
+  }
+
+  private init() {
+    if (this.initialized) return;
+    this.initialized = true;
+    console.log('🟡 [VoiceListener] init — registering native listeners');
+    try {
+      this.subscriptions.push(
+        addSpeechRecognitionListener('result', (e) => {
+          const text = e.results?.[0]?.transcript;
+          if (text && e.isFinal) {
+            this.onResult?.(text);
+          } else if (text) {
+            this.onPartial?.(text);
+          }
+        }),
+        addSpeechRecognitionListener('error', (e) => {
+          const msg = e.error ?? 'Speech recognition error';
+          if (msg === 'no-speech') return;
+          this.onError?.(msg);
+        }),
+      );
+      console.log('🟡 [VoiceListener] native listeners registered OK');
+    } catch (e) {
+      console.error('🔴 [VoiceListener] failed to register listeners:', e);
+    }
   }
 
   async start(locale = 'en-US'): Promise<void> {
+    // Register listeners on first use
+    this.init();
+
     const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!granted) {
       this.onError?.('Microphone permission denied');
@@ -78,5 +91,6 @@ export class VoiceListener {
   destroy() {
     this.subscriptions.forEach((s) => s.remove());
     this.subscriptions = [];
+    this.initialized = false;
   }
 }

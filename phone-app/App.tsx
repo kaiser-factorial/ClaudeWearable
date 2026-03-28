@@ -1,8 +1,12 @@
 import React from 'react';
+import { TouchableOpacity, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { enableScreens } from 'react-native-screens';
+
+enableScreens();
+
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { TouchableOpacity, Text } from 'react-native';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 

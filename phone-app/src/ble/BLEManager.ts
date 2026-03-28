@@ -28,7 +28,12 @@ class WearableBLEManager {
   private statusListeners: ((status: BLEStatus, msg?: string) => void)[] = [];
 
   constructor() {
-    this.manager = new BleManager();
+    try {
+      this.manager = new BleManager();
+    } catch (e) {
+      console.error('[BLEManager] Failed to initialize BleManager:', e);
+      this.manager = null as any;
+    }
   }
 
   onStatusChange(cb: (status: BLEStatus, msg?: string) => void) {
@@ -132,4 +137,11 @@ class WearableBLEManager {
 }
 
 // Singleton — one BLE manager for the whole app
-export const bleManager = new WearableBLEManager();
+let bleManager: WearableBLEManager;
+try {
+  bleManager = new WearableBLEManager();
+} catch (e) {
+  console.error('[BLEManager] Failed to create singleton:', e);
+  bleManager = new WearableBLEManager();
+}
+export { bleManager };

@@ -40,15 +40,11 @@ export function HomeScreen() {
   const [lastCommand, setLastCommand] = useState<LEDCommand | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const voice = useRef(new VoiceListener());
+  const voice = useRef<VoiceListener | null>(null);
 
   useEffect(() => {
-    const unsubscribe = bleManager.onStatusChange((status, msg) => {
-      setBleStatus(status);
-      setBleMessage(msg ?? statusLabel(status));
-    });
-
-    const vl = voice.current;
+    const vl = new VoiceListener();
+    voice.current = vl;
     vl.onPartial = setPartialText;
     vl.onResult = handleTranscript;
     vl.onError = (msg) => {
@@ -56,9 +52,15 @@ export function HomeScreen() {
       setErrorMessage(msg);
     };
 
+    const unsubscribe = bleManager.onStatusChange((status, msg) => {
+      setBleStatus(status);
+      setBleMessage(msg ?? statusLabel(status));
+    });
+
     return () => {
       unsubscribe();
       vl.destroy();
+      voice.current = null;
     };
   }, []);
 
@@ -107,7 +109,7 @@ export function HomeScreen() {
   }
 
   async function handleSpeakStart() {
-    if (!bleManager.isConnected) return;
+    if (!bleManager.isConnected || !voice.current) return;
     setProcessingState('listening');
     setPartialText('');
     setLastTranscript('');
@@ -116,9 +118,8 @@ export function HomeScreen() {
   }
 
   async function handleSpeakEnd() {
-    if (processingState !== 'listening') return;
+    if (processingState !== 'listening' || !voice.current) return;
     await voice.current.stop();
-    // processingState transitions to 'thinking' inside handleTranscript
   }
 
   const canSpeak = bleStatus === 'connected' && processingState === 'idle';
@@ -144,7 +145,7 @@ export function HomeScreen() {
             {bleStatus === 'connected'
               ? 'Disconnect'
               : bleStatus === 'scanning' || bleStatus === 'connecting'
-              ? 'Searching…'
+              ? 'Searching...'
               : 'Scan'}
           </Text>
         </TouchableOpacity>
@@ -160,7 +161,7 @@ export function HomeScreen() {
             <Text style={styles.commandDesc}>{COMMAND_DESCRIPTIONS[lastCommand]}</Text>
           </>
         ) : (
-          <Text style={styles.commandPlaceholder}>— — —</Text>
+          <Text style={styles.commandPlaceholder}>---</Text>
         )}
       </View>
 
@@ -182,7 +183,7 @@ export function HomeScreen() {
           <View style={styles.processingContainer}>
             <ActivityIndicator size="large" color="#3b82f6" />
             <Text style={styles.processingText}>
-              {processingState === 'thinking' ? 'Asking Claude…' : 'Sending to device…'}
+              {processingState === 'thinking' ? 'Asking Claude...' : 'Sending to device...'}
             </Text>
           </View>
         ) : (
@@ -199,7 +200,7 @@ export function HomeScreen() {
             <Text style={styles.speakButtonIcon}>{isSpeaking ? '🎙' : '🎤'}</Text>
             <Text style={styles.speakButtonText}>
               {isSpeaking
-                ? 'Listening…'
+                ? 'Listening...'
                 : !bleManager.isConnected
                 ? 'Connect first'
                 : 'Hold to speak'}
