@@ -118,8 +118,19 @@ export function HomeScreen() {
   }
 
   async function handleSpeakEnd() {
-    if (processingState !== 'listening' || !voice.current) return;
+    if (!voice.current) return;
+    console.log('🟡 [HomeScreen] handleSpeakEnd, state:', processingState);
     await voice.current.stop();
+    // If no transcript came through, go back to idle
+    setTimeout(() => {
+      setProcessingState((prev) => {
+        if (prev === 'listening') {
+          console.log('🟡 [HomeScreen] No result received, resetting to idle');
+          return 'idle';
+        }
+        return prev;
+      });
+    }, 1500);
   }
 
   const canSpeak = bleStatus === 'connected' && processingState === 'idle';

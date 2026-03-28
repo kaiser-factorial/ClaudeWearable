@@ -1,0 +1,78 @@
+diff --git a/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognitionModule.swift b/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognitionModule.swift
+index 5264fa4..1ad0df2 100644
+--- a/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognitionModule.swift
++++ b/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognitionModule.swift
+@@ -49,6 +49,20 @@ public class ExpoSpeechRecognitionModule: Module {
+   // ]
+   var previousResult: SFSpeechRecognitionResult?
+ 
++  // iOS 26 workaround: queue events for JS polling since addListener crashes
++  var pendingEvents: [[String: Any]] = []
++  let pendingEventsLock = NSLock()
++
++  func queueEvent(_ type: String, _ data: [String: Any]? = nil) {
++    pendingEventsLock.lock()
++    var event: [String: Any] = ["type": type]
++    if let data = data {
++      event["data"] = data
++    }
++    pendingEvents.append(event)
++    pendingEventsLock.unlock()
++  }
++
+   public func definition() -> ModuleDefinition {
+     // Sets the name of the module that JavaScript code will use to refer to the module. Takes a string as an argument.
+     // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
+@@ -98,6 +112,15 @@ public class ExpoSpeechRecognitionModule: Module {
+       "volumechange"
+     )
+ 
++    // iOS 26 workaround: poll for events since addListener crashes on iOS 26
++    Function("pollEvents") { () -> [[String: Any]] in
++      self.pendingEventsLock.lock()
++      let events = self.pendingEvents
++      self.pendingEvents = []
++      self.pendingEventsLock.unlock()
++      return events
++    }
++
+     OnCreate {
+       guard let permissionsManager = appContext?.permissions else {
+         return
+@@ -429,13 +452,16 @@ public class ExpoSpeechRecognitionModule: Module {
+   func sendErrorAndStop(error: String, message: String) {
+     hasSeenFinalResult = false
+     previousResult = nil
++    queueEvent("error", ["error": error, "message": message])
+     sendEvent("error", ["error": error, "message": message])
++    queueEvent("end")
+     sendEvent("end")
+   }
+ 
+   func handleEnd() {
+     hasSeenFinalResult = false
+     previousResult = nil
++    queueEvent("end")
+     sendEvent("end")
+   }
+ 
+@@ -511,13 +537,12 @@ public class ExpoSpeechRecognitionModule: Module {
+       }
+     }
+ 
+-    sendEvent(
+-      "result",
+-      [
+-        "isFinal": isFinal,
+-        "results": results.map { $0.toDictionary() },
+-      ]
+-    )
++    let resultData: [String: Any] = [
++      "isFinal": isFinal,
++      "results": results.map { $0.toDictionary() },
++    ]
++    queueEvent("result", resultData)
++    sendEvent("result", resultData)
+ 
+     previousResult = result
+   }

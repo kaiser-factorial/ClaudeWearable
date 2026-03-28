@@ -242,7 +242,7 @@ PODS:
     - Yoga
   - ExpoSecureStore (14.0.1):
     - ExpoModulesCore
-  - ExpoSpeechRecognition (2.1.5):
+  - ExpoSpeechRecognition (3.1.2):
     - ExpoModulesCore
   - EXUpdatesInterface (1.0.0):
     - ExpoModulesCore
@@ -2067,7 +2067,7 @@ SPEC CHECKSUMS:
   ExpoAsset: 286fee7ba711ce66bf20b315e68106b13b8629fc
   ExpoModulesCore: 15f60d00e33ca0cea27147543877ca6e70c42ef5
   ExpoSecureStore: 9a3665d7161dd1031be386e278bffd623658f316
-  ExpoSpeechRecognition: c927769c7bec19204fc0bfe28355487fbc87f871
+  ExpoSpeechRecognition: 3e416e568451e62678e8085469bcaff557b0b2b9
   EXUpdatesInterface: 7c977640bdd8b85833c19e3959ba46145c5719db
   FBLazyVector: 1bf99bb46c6af9a2712592e707347315f23947aa
   fmt: 10c6e61f4be25dc963c36bd73fc7b1705fe975be
