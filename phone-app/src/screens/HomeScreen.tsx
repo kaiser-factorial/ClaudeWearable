@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   Pressable,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
   Modal,
   Animated,
   Dimensions,
+  Keyboard,
 } from 'react-native';
 import { bleManager, BLEStatus, SensorData, parseSensorData } from '../ble/BLEManager';
 import { LEDCommand, COMMAND_DESCRIPTIONS } from '../ble/commands';
@@ -51,6 +53,7 @@ export function HomeScreen() {
   const [logVisible, setLogVisible] = useState(false);
   const [sensorsActive, setSensorsActive] = useState(false);
   const [displaySensors, setDisplaySensors] = useState<SensorData | null>(null);
+  const [textInput, setTextInput] = useState('');
 
   const voice = useRef<VoiceListener | null>(null);
   const pendingTranscript = useRef<string | null>(null);
@@ -193,9 +196,10 @@ export function HomeScreen() {
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
-      setProcessingState('sending');
-
-      await bleManager.sendCommand(result.command);
+      if (bleManager.isConnected) {
+        setProcessingState('sending');
+        await bleManager.sendCommand(result.command);
+      }
     } catch (e: any) {
       setErrorMessage(e.message ?? 'Something went wrong.');
     } finally {
@@ -212,10 +216,10 @@ export function HomeScreen() {
   }
 
   async function handleSpeakToggle() {
-    if (!bleManager.isConnected || !voice.current) return;
+    if (!voice.current) return;
 
     if (processingState === 'listening') {
-      // Second press → stop & send to Claude
+      // Second press → stop & send
       console.log('🟡 [HomeScreen] Toggle OFF — stopping voice');
       voice.current.stop();
       const text = pendingTranscript.current;
@@ -234,15 +238,24 @@ export function HomeScreen() {
       setPartialText('');
       setLastTranscript('');
       setErrorMessage('');
-      // Request sensor snapshot if sensors are active
-      if (sensorsActive) {
+      // Request sensor snapshot if sensors are active and connected
+      if (sensorsActive && bleManager.isConnected) {
         try { await bleManager.sendRaw('SR'); } catch {}
       }
       await voice.current.start();
     }
   }
 
-  const canSpeak = bleStatus === 'connected' && processingState === 'idle';
+  async function handleTextSubmit() {
+    const text = textInput.trim();
+    if (!text || processingState !== 'idle') return;
+    Keyboard.dismiss();
+    setTextInput('');
+    transcriptSent.current = false;
+    handleTranscriptRef.current(text);
+  }
+
+  const canSpeak = processingState === 'idle';
   const isSpeaking = processingState === 'listening';
   const isProcessing = processingState === 'thinking' || processingState === 'sending';
 
@@ -306,7 +319,7 @@ export function HomeScreen() {
           <View style={styles.processingContainer}>
             <ActivityIndicator size="large" color="#3b82f6" />
             <Text style={styles.processingText}>
-              {processingState === 'thinking' ? 'Asking Claude...' : 'Sending to device...'}
+              {processingState === 'thinking' ? 'Thinking...' : 'Sending to device...'}
             </Text>
           </View>
         ) : (
@@ -318,14 +331,11 @@ export function HomeScreen() {
             ]}
             onPress={handleSpeakToggle}
             disabled={!canSpeak && !isSpeaking}
+
           >
             <Text style={styles.speakButtonIcon}>{isSpeaking ? '🎙' : '🎤'}</Text>
             <Text style={styles.speakButtonText}>
-              {isSpeaking
-                ? 'Tap to send'
-                : !bleManager.isConnected
-                ? 'Connect first'
-                : 'Tap to speak'}
+              {isSpeaking ? 'Tap to send' : 'Tap to speak'}
             </Text>
           </Pressable>
         )}
@@ -352,6 +362,28 @@ export function HomeScreen() {
           )}
         </View>
       )}
+
+      {/* Text input */}
+      <View style={styles.textInputBar}>
+        <TextInput
+          style={styles.textInput}
+          placeholder="Or type a message..."
+          placeholderTextColor="#555"
+          value={textInput}
+          onChangeText={setTextInput}
+          onSubmitEditing={handleTextSubmit}
+          returnKeyType="send"
+          editable={processingState === 'idle'}
+          autoCorrect={false}
+        />
+        <TouchableOpacity
+          style={[styles.sendButton, (!textInput.trim() || processingState !== 'idle') && styles.sendButtonDisabled]}
+          onPress={handleTextSubmit}
+          disabled={!textInput.trim() || processingState !== 'idle'}
+        >
+          <Text style={styles.sendButtonText}>Send</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Log button */}
       {sessionLog.length > 0 && (
@@ -563,6 +595,39 @@ const styles = StyleSheet.create({
   processingText: {
     color: '#888',
     fontSize: 14,
+  },
+  textInputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1a1a1a',
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    color: '#fff',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  sendButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  sendButtonDisabled: {
+    opacity: 0.3,
+  },
+  sendButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   logButton: {
     alignSelf: 'center',

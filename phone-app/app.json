@@ -1,19 +1,19 @@
 {
   "expo": {
-    "name": "Claude Wearable",
-    "slug": "claude-wearable",
+    "name": "Wearable LLM",
+    "slug": "wearable-llm",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "claudewearable",
+    "scheme": "wearablellm",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.claudewearable.app",
       "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "Claude Wearable uses Bluetooth to send LED commands to your device.",
-        "NSMicrophoneUsageDescription": "Claude Wearable uses your microphone to listen for voice commands.",
-        "NSSpeechRecognitionUsageDescription": "Claude Wearable converts your speech to text to send to Claude."
+        "NSBluetoothAlwaysUsageDescription": "Wearable LLM uses Bluetooth to send LED commands to your device.",
+        "NSMicrophoneUsageDescription": "Wearable LLM uses your microphone to listen for voice commands.",
+        "NSSpeechRecognitionUsageDescription": "Wearable LLM converts your speech to text to send to Claude."
       }
     },
     "android": {
@@ -34,14 +34,14 @@
         {
           "isBackgroundEnabled": false,
           "modes": ["peripheral", "central"],
-          "bluetoothAlwaysPermission": "Claude Wearable uses Bluetooth to send LED commands to your device."
+          "bluetoothAlwaysPermission": "Wearable LLM uses Bluetooth to send LED commands to your device."
         }
       ],
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Claude Wearable uses your microphone to listen for voice commands.",
-          "speechRecognitionPermission": "Claude Wearable converts your speech to text to send to Claude."
+          "microphonePermission": "Wearable LLM uses your microphone to listen for voice commands.",
+          "speechRecognitionPermission": "Wearable LLM converts your speech to text to send to Claude."
         }
       ]
     ]

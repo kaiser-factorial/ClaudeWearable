@@ -16,8 +16,9 @@ phone-app/ios/build/
 # macOS
 .DS_Store
 
-# Adafruit bundle (large, can be re-downloaded)
+# Adafruit bundle and firmware (large, can be re-downloaded)
 adafruit-circuitpython-bundle-*/
+*.uf2
 
 # Environment
 .env

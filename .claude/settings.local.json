@@ -11,7 +11,12 @@
       "Bash(/Volumes/CIRCUITPY/boot.py:*)",
       "Bash(python3 -c \":*)",
       "mcp__Desktop_Commander__list_directory",
-      "Bash(xcodebuild -workspace ios/ClaudeWearable.xcworkspace -scheme ClaudeWearable -destination 'generic/platform=iOS' build)"
+      "Bash(xcodebuild -workspace ios/ClaudeWearable.xcworkspace -scheme ClaudeWearable -destination 'generic/platform=iOS' build)",
+      "Bash(pod deintegrate:*)",
+      "Bash(pod install:*)",
+      "Bash(export LANG=en_US.UTF-8)",
+      "Bash(export LC_ALL=en_US.UTF-8)",
+      "Bash(chmod +x /Users/corinakaiser/Desktop/ClaudeWearable/rebuild-ios.sh)"
     ]
   }
 }

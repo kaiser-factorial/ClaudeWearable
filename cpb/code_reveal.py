@@ -1,5 +1,5 @@
 """
-Claude Wearable — Circuit Playground Bluefruit
+Wearable LLM — Circuit Playground Bluefruit
 Reveal Panel variant (servo clamshell + BLE + NeoPixels + speaker)
 
 When a response arrives:
@@ -192,7 +192,7 @@ def idle_heartbeat(frame: int) -> None:
 # ── BLE setup ──────────────────────────────────────────────────────────────────
 
 ble       = adafruit_ble.BLERadio()
-ble.name  = "Claude Wearable"
+ble.name  = "Wearable LLM"
 uart      = UARTService()
 advertisement = ProvideServicesAdvertisement(uart)
 

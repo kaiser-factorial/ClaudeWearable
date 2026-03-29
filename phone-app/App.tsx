@@ -33,7 +33,7 @@ export default function App() {
           name="Home"
           component={HomeScreen}
           options={({ navigation }) => ({
-            title: 'Claude Wearable',
+            title: 'Wearable LLM',
             headerRight: () => (
               <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
                 <Text style={{ color: '#888', fontSize: 22 }}>⚙️</Text>

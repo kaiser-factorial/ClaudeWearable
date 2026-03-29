@@ -13,6 +13,7 @@ export interface ProviderConfig {
   provider: Provider;
   model: string;
   ollamaUrl?: string;
+  customSystemPrompt?: string;
 }
 
 export const DEFAULT_MODELS: Record<Provider, string> = {

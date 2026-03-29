@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { DEFAULT_SYSTEM_PROMPT } from '../api/llm';
 import {
   Provider,
   ProviderConfig,
@@ -56,6 +57,8 @@ export function SettingsScreen() {
   const [provider, setProvider] = useState<Provider>('anthropic');
   const [model, setModel] = useState(DEFAULT_MODELS.anthropic);
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [hasSavedKey, setHasSavedKey] = useState(false);
 
@@ -66,6 +69,7 @@ export function SettingsScreen() {
       setProvider(config.provider);
       setModel(config.model);
       if (config.ollamaUrl) setOllamaUrl(config.ollamaUrl);
+      if (config.customSystemPrompt) setCustomPrompt(config.customSystemPrompt);
 
       const key = await loadProviderApiKey(config.provider);
       setHasSavedKey(!!key);
@@ -86,6 +90,7 @@ export function SettingsScreen() {
       provider: p,
       model: DEFAULT_MODELS[p],
       ollamaUrl: p === 'ollama' ? ollamaUrl : undefined,
+      customSystemPrompt: p === 'ollama' ? customPrompt || undefined : undefined,
     });
   }
 
@@ -94,8 +99,14 @@ export function SettingsScreen() {
       provider,
       model: model.trim() || DEFAULT_MODELS[provider],
       ollamaUrl: provider === 'ollama' ? ollamaUrl.trim() : undefined,
+      customSystemPrompt: provider === 'ollama' ? customPrompt.trim() || undefined : undefined,
     });
     Alert.alert('Saved', 'Model configuration updated.');
+  }
+
+  function handleResetPrompt() {
+    setCustomPrompt('');
+    Alert.alert('Reset', 'System prompt will use the default on next save.');
   }
 
   async function handleSaveKey() {
@@ -195,6 +206,48 @@ export function SettingsScreen() {
           </>
         )}
 
+        {/* System Prompt (only for Ollama) */}
+        {provider === 'ollama' && (
+          <>
+            <TouchableOpacity
+              style={styles.promptToggle}
+              onPress={() => setPromptExpanded(!promptExpanded)}
+            >
+              <Text style={styles.label}>
+                System Prompt {promptExpanded ? '▼' : '▶'}
+              </Text>
+              <Text style={styles.promptStatus}>
+                {customPrompt.trim() ? 'Custom' : 'Default'}
+              </Text>
+            </TouchableOpacity>
+
+            {promptExpanded && (
+              <>
+                <TextInput
+                  style={styles.promptInput}
+                  placeholder={DEFAULT_SYSTEM_PROMPT}
+                  placeholderTextColor="#333"
+                  value={customPrompt}
+                  onChangeText={setCustomPrompt}
+                  multiline
+                  textAlignVertical="top"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {customPrompt.trim() ? (
+                  <TouchableOpacity style={styles.resetButton} onPress={handleResetPrompt}>
+                    <Text style={styles.resetText}>Reset to default</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.hint}>
+                    Leave empty to use the default prompt. The prompt must instruct the model to respond with a 2-character LED code on line 1.
+                  </Text>
+                )}
+              </>
+            )}
+          </>
+        )}
+
         <TouchableOpacity style={styles.button} onPress={handleSaveConfig}>
           <Text style={styles.buttonText}>Save Model Config</Text>
         </TouchableOpacity>
@@ -263,9 +316,9 @@ export function SettingsScreen() {
       <Text style={styles.sectionTitle}>About</Text>
 
       <Text style={styles.aboutText}>
-        Claude Wearable turns your voice into light. Ask a question, and an AI interprets
-        your intent and responds through colored LED animations on an Adafruit Circuit
-        Playground Bluefruit.
+        Ask a question, and the AI responds — in words, and in light. LED animations
+        and sounds on an Adafruit Circuit Playground Bluefruit give the AI another
+        dimension of expression, embodying its response beyond text.
       </Text>
 
       <Text style={styles.aboutText}>
@@ -346,6 +399,41 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#333',
+  },
+  promptToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  promptStatus: {
+    color: '#666',
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  promptInput: {
+    backgroundColor: '#1a1a1a',
+    color: '#fff',
+    borderRadius: 10,
+    padding: 14,
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+    minHeight: 200,
+    maxHeight: 400,
+    lineHeight: 18,
+  },
+  resetButton: {
+    padding: 10,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  resetText: {
+    color: '#f59e0b',
+    fontSize: 13,
   },
   button: {
     backgroundColor: '#2563eb',

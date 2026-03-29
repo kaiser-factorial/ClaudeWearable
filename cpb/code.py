@@ -1,5 +1,5 @@
 """
-Claude Wearable — Circuit Playground Bluefruit (Phase 2: BLE + Animations)
+Wearable LLM — Circuit Playground Bluefruit (Phase 2: BLE + Animations)
 Receives a 2-byte command over BLE UART and responds with a NeoPixel
 animation + speaker earcon.
 
@@ -160,7 +160,7 @@ def update_animation(frame, color, anim):
 # ── BLE setup ──────────────────────────────────────────────────────────────────
 
 ble = adafruit_ble.BLERadio()
-ble.name = "Claude Wearable"
+ble.name = "Wearable LLM"
 uart = UARTService()
 advertisement = ProvideServicesAdvertisement(uart)
 

@@ -1,5 +1,5 @@
 /**
- * BLE manager — scans for "Claude Wearable" devices advertising Nordic UART
+ * BLE manager — scans for "Wearable LLM" devices advertising Nordic UART
  * Service (NUS), connects, and writes 2-byte commands to the RX characteristic.
  *
  * Works with any microcontroller advertising NUS:
@@ -17,8 +17,8 @@ const NUS_SERVICE = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
 const NUS_RX_CHAR = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E'; // phone writes here
 const NUS_TX_CHAR = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E'; // phone reads here
 
-// Device name set in cpb/code.py: ble.name = "Claude Wearable"
-const DEVICE_NAME = 'Claude Wearable';
+// Device name set in cpb/code.py: ble.name = "Wearable LLM"
+const DEVICE_NAME = 'Wearable LLM';
 
 export type BLEStatus = 'idle' | 'scanning' | 'connecting' | 'connected' | 'error';
 

@@ -62,5 +62,12 @@ target 'ClaudeWearable' do
         end
       end
     end
+
+    # Disable Explicitly Built Modules (fixes Xcode 16+ modulemap errors with CocoaPods)
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      end
+    end
   end
 end

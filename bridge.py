@@ -40,7 +40,7 @@ from bleak import BleakClient, BleakScanner
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-DEVICE_NAME   = "Claude Wearable"
+DEVICE_NAME   = "Wearable LLM"
 UART_RX_UUID  = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"  # laptop writes here
 
 CLAUDE_MODEL  = "claude-opus-4-6"

@@ -42,6 +42,8 @@ That's one of the oldest questions in philosophy. Nobody has a definitive answer
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export { SYSTEM_PROMPT as DEFAULT_SYSTEM_PROMPT };
+
 export interface LLMResponse {
   command: LEDCommand;
   explanation: string;
@@ -53,6 +55,7 @@ async function fetchAnthropic(
   transcript: string,
   model: string,
   apiKey: string,
+  systemPrompt: string,
 ): Promise<string> {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -64,7 +67,7 @@ async function fetchAnthropic(
     body: JSON.stringify({
       model,
       max_tokens: 100,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [{ role: 'user', content: transcript }],
     }),
   });
@@ -82,6 +85,7 @@ async function fetchOpenAI(
   transcript: string,
   model: string,
   apiKey: string,
+  systemPrompt: string,
 ): Promise<string> {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -93,7 +97,7 @@ async function fetchOpenAI(
       model,
       max_tokens: 100,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: transcript },
       ],
     }),
@@ -112,6 +116,7 @@ async function fetchOllama(
   transcript: string,
   model: string,
   ollamaUrl: string,
+  systemPrompt: string,
 ): Promise<string> {
   const baseUrl = ollamaUrl.replace(/\/+$/, '');
   const response = await fetch(`${baseUrl}/api/chat`, {
@@ -121,7 +126,7 @@ async function fetchOllama(
       model,
       stream: false,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: transcript },
       ],
     }),
@@ -169,17 +174,18 @@ export async function getCommandFromLLM(
   config: ProviderConfig,
   apiKey: string | null,
 ): Promise<LLMResponse> {
+  const prompt = config.customSystemPrompt?.trim() || SYSTEM_PROMPT;
   let raw: string;
 
   switch (config.provider) {
     case 'anthropic':
       if (!apiKey) throw new Error('Anthropic API key is required.');
-      raw = await fetchAnthropic(transcript, config.model, apiKey);
+      raw = await fetchAnthropic(transcript, config.model, apiKey, prompt);
       break;
 
     case 'openai':
       if (!apiKey) throw new Error('OpenAI API key is required.');
-      raw = await fetchOpenAI(transcript, config.model, apiKey);
+      raw = await fetchOpenAI(transcript, config.model, apiKey, prompt);
       break;
 
     case 'ollama':
@@ -187,6 +193,7 @@ export async function getCommandFromLLM(
         transcript,
         config.model,
         config.ollamaUrl || 'http://localhost:11434',
+        prompt,
       );
       break;
 
